@@ -1,0 +1,199 @@
+## Loading libraries and custom functions
+
+## Required libraries
+library(Matrix)
+library(MASS)
+library(igraphdata)
+library(igraph)
+library(sand)
+library(devtools)
+library(dplyr)
+# library(graphclass)
+library(caret)
+library(naniar)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(rARPACK)
+library(rpart)
+library(varhandle)
+library(randomForest)
+library(rerf)
+
+## Custom functions
+## Link for syntax on creating functions in different R scripts: https://github.com/jesusdaniel/dcmase
+source("Plots.R")
+source("extra_functions.R")
+source("matrix_to_vec.R")
+source("mase.R")
+source("ase.R")
+source("clustering_vertices.R")
+source("cluster_testing.R")
+# source("rpart_gini.R")
+source("rf_training.R")
+source("rf_testing.R")
+source("Mode.R")
+source("rf_training2.R")
+source("rf_testing2.R")
+source("generate_data.R")
+
+## Simulate data
+
+## Generate population of graphs
+## Class 1:
+set.seed(42)
+
+n <- 30 # number of vertices
+p1 <- 0.2 # edge probability
+m1 <- 50  # number of samples in class 1
+Adj_list_1 <- list()
+
+# for(i in 1:m1) {
+#   G1 <- sample_gnp(n, p = p1, directed = FALSE, loops = FALSE)
+#   A <- get.adjacency(G1)
+#   Adj_list_1[[i]] <- A
+# }
+
+## Same with lapply, but faster than for loop
+Adj_list_1 <- lapply(1:m1, function(i) get.adjacency(sample_gnp(n, p = p1, directed = FALSE, loops = FALSE)))
+
+## Class 2:
+set.seed(45)
+
+n <- 30 # number of vertices
+p2 <- 0.6 # edge probability
+m2 <- 50  # number of samples in class 2
+Adj_list_2 <- list()
+
+Adj_list_2 <- lapply(1:m2, function(i) get.adjacency(sample_gnp(n, p = p2, directed = FALSE, loops = FALSE)))
+
+## Simulated data:
+Adj_list <- c(Adj_list_1, Adj_list_2)
+# length(Adj_list) --> 100
+class_label <- c(rep(1, m1), rep(-1, m2))
+
+## Convert to a 100 x 435 dataframe
+erdos_sims_df=c() # List of all sims
+
+for(i in 1:100){
+  sims_matrix=Adj_list[[i]]
+  A = matrix(0, 30, 30)
+  
+  ## Convert empty elements in sparse matrix with 0's
+  for(j in 1:30){
+    for (k in 1:30){
+      if (sims_matrix[j,k] == 1){
+        A[j,k]=sims_matrix[j,k] # Change the value of (j,k) element in matrix A to 1 if the element the corresponding position of the sims_matrix is 1 
+      }
+    }
+  }
+    
+  ## Appending the sims list with vectors (converted from matrices)
+  erdos_sims_df=rbind(erdos_sims_df,matrix_to_vec(A, type="undirected"))
+}
+
+erdos_sims_df=as.data.frame(erdos_sims_df)
+# dim(erdos_sims_df) # Checking the dimensions of the dataframe --> 100 x 435
+
+## Adding columns for response variable and id
+erdos_sims_df$id=c(1:100)
+erdos_sims_df$response=class_label
+erdos_sims_df=erdos_sims_df[,c(436,437,1:435)] # Rearranging the data so that the id and response show up as the first and second columns of the data frame, respectively
+head(erdos_sims_df,n=10)
+
+## Create stratified folds
+
+## Implementing stratified cross validation
+# Create a list of testing and training data
+set.seed(45)
+testing_data_list=createFolds(erdos_sims_df$response, k = 5, list = TRUE, returnTrain = FALSE)
+
+## Populate the training data folds
+training_data_list=list(Fold1=c(),Fold2=c(),Fold3=c(),Fold4=c(),Fold5=c())
+for(k in 1:5){
+  training_data_list[[k]]=(1:100)[-testing_data_list[[k]]]
+}
+
+
+## Fit the standard and SPORF RF methods on the raw data
+
+## Standard RF
+for(i in 1:5) {  
+  training_data=erdos_sims_df[training_data_list[[i]],]
+  testing_data=erdos_sims_df[testing_data_list[[i]],]
+      
+  ## Train classifier on training_data_list[[i]]
+  set.seed(45)
+  rf <- randomForest(x=training_data[,c(3:ncol(training_data))],
+                     y=factor(training_data[,2]),
+                     ntree=10,
+                     importance=TRUE)
+  ## Test classifier on testing_data_list[[1]]
+  test=predict(rf,newdata=testing_data[,c(2:ncol(testing_data))],type='response')
+  
+  # Store result on classification_results[i]
+  classification_results[i]=1-mean(test != testing_data$response)
+}
+    
+## Store results
+avg_acc_RF=mean(classification_results) # Store classification accuracy of the standard RF method
+sd_acc_RF=sd(classification_results) # Standard deviation of cross-validated classification accuracy across all 5 folds
+
+
+## SPORF
+for(i in 1:5) {  
+  training_data=erdos_sims_df[training_data_list[[i]],]
+  testing_data=erdos_sims_df[testing_data_list[[i]],]
+      
+  ## Train classifier on training_data_list[[i]]
+  sporf <- RerF(X=training_data[,c(3:ncol(training_data))], 
+                  Y=factor(training_data[,2]), 
+                  trees=10,
+                  num.cores = 1L,
+                  seed = 45)
+  test <- Predict(testing_data[,c(2:ncol(testing_data))], sporf, num.cores = 1L, Xtrain = 
+                  training_data[,c(3:ncol(training_data))])
+  
+  # Store result on classification_results[i]
+  classification_results[i]=1-mean(test != testing_data$response)
+}
+    
+## Store results
+avg_acc_SPORF=mean(classification_results) # Store classification accuracy of the SPORF method
+sd_acc_SPORF=sd(classification_results) # Standard deviation of cross-validated classification accuracy across all 5 folds
+
+
+## Implemented nested cross validation for NRF1 and NRF2
+
+classification_results=c()
+
+for(j in 1:5){ # Fold j (validation)
+  #browser()
+  non_j_ind=c(1:5)[-j]
+  k_df=data.frame(matrix(ncol = 30, nrow = 4)) # Empty i x k dataframe to store all predictive accuracies
+  k_vec=c() # Vector to store all average predictive accuracies for all k
+  k_star=0 # Define hyperparameter for number of clusters
+  for(i in non_j_ind){ # Fold i (testing)
+    valid_results=rep(-Inf,30)
+    training_data1=erdos_sims_df[-c(testing_data_list[[i]],testing_data_list[[j]]),] # Training data (excluding both the jth and ith folds)
+    valid_data=erdos_sims_df[testing_data_list[[i]],] # ith fold for validation set
+    for(k in 2:10){ # Number of clusters
+      nrf1_valid=rf_training(B=10,n=nrow(training_data1),X_training=training_data1,num_clusters=k,prop_vert=.8)
+      valid=rf_testing_pred(X_testing=valid_data,rf_training=nrf1_valid,num_clusters=k)
+      valid_results[k]=1-mean(valid != valid_data$response) # For each fold, store the predictive accuracy for all values of k
+    }
+    k_df[i,]=valid_results
+  }
+  ## Take columnwise means across all i folds
+  k_vec=colMeans(k_df,na.rm=TRUE)
+  k_star=which.max(k_vec) # Obtain the index (i.e. value of k) that yielded the maximum predictive accuracy for the ith fold
+  training_data2=erdos_sims_df[training_data_list[[j]],] # Training data (excluding only the jth fold)
+  testing_data=erdos_sims_df[testing_data_list[[j]],] # jth fold for testing set
+  nrf1_test=rf_training(B=10,n=nrow(training_data2),X_training=training_data2,num_clusters=k_star,prop_vert=.8)
+  test=rf_testing_pred(X_testing=testing_data,rf_training=nrf1_test,num_clusters=k_star)
+  classification_results[j]=1-mean(test != testing_data$response) # For each fold, store the predictive accuracy for all values of k
+}
+
+## Store results
+avg_acc_NRF1=mean(classification_results) # Store classification accuracy of the NRF1 method
+sd_acc_NRF1=sd(classification_results) # Standard deviation of cross-validated classification accuracy across all 5 folds

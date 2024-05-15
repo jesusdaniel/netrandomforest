@@ -1,0 +1,248 @@
+---
+title: "Spectral Clustering Dimensional Reduction Within Random Forest Models"
+author: Tiffany Chang
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Spectral Clustering Dimensional Reduction Within Random Forest Models}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+## Introduction
+
+This vignette is designed to explain in-depth about the purpose and usage of the netRandomForest package. Overall, it is used to perform spectral clustering within a random forest model in order to reduce the dimensionality of a data set with a large number of predictors. In this document, it is built on R simulated data from the Stochastic Block Model (SBM). The net random forest models are meant to reduce the running time for classifying each observation to one of the two categories of the binary response of interest (more details in the next section), despite having potentially thousands of predictors in the SBM data set. Thus, this example demonstrates a classification problem that integrates dimensional reduction to achieve maximum efficiency while retaining a reasonable predictive performance.
+
+We will use the following packages and source files:
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup,message=FALSE,warning=FALSE}
+## Required libraries
+library(netRandomForest)
+library(randomForest)
+library(rerf)
+library(Matrix)
+library(MASS)
+library(lattice)
+library(igraphdata)
+library(igraph)
+library(sand)
+library(devtools)
+library(dplyr)
+library(caret)
+library(naniar)
+library(tidyr)
+library(ggplot2)
+library(reshape2)
+library(rARPACK)
+library(varhandle)
+library(ROCR)
+
+## Source functions
+source("../../Plots.R")
+source("../../extra_functions.R")
+```
+
+## Data
+
+To reiterate, the data is generated in R through a simulation of 100 networks from the SBM and simultaneously pre-processed within the generate_data_SBM custom function. The processed data set contains a very large number of binary predictors (0 or 1) and a binary response (1 for Class 1 or -1 for Class 2). The number of predictors is based on the number of vertices/nodes (n) in each of the generated SBM undirected graphs. In this case, we have n = 100 for our simulations, so the total number of variables is (n*(n-1))/2 = (100 x 99)/2 = 4950. There are three main goals to the overall analyses performed in this vignette: implement spectral clustering within random forest models to enhance the efficiency and quality of predictions, given the high dimensionality of this data set, identify important "blocks" or communities within the SBM data (using Gini-based variable importance metrics), and how "close" the important variables are to those of the true simulation (a performance measure gauged by the ROC curve). [Note: I don't think I did a great job explaining the variable importance portion.]
+
+It is important to note that for each individual SBM simulation, the block model was pre-specified to have five communities (a 5 x 5 "block" matrix) with the diagonal blocks having a probability of 0.5 (p1) and the off-diagonal blocks having a probability of 0.1 (p2) [Note: Not sure if I am explaining this right]. These probabilities represent the likelihood of two different nodes having a shared edge within a certain community (1 if a pair of node is connected, and 0 otherwise). We define another probability, q, that is designated for generating different "classes" of SBM simulations by effectively changing one of the off-diagonal blocks to have a probability of greater than p1 and less than or equal to p2. For demonstration purposes below, we set q to be 0 for Class 1 and 0.4 for Class 2. The data was originally a list of 100 SBM graphs that were converted to adjacency matrices, 50 from Class 1 (m1) and the other 50 from Class 2 (m2). In order to pre-process the raw data into a suitable form for fitting machine learning algorithms in R, all elements in the upper diagonal of each adjacency matrix was converted to a vector in major-column order. This means that the columns or predictors of the resulting data frame represents the connectivity of all unique pairwise combinations of the nodes. We repeated this process until we obtain 100 vectors (observations) and combine them (row-wise) into an R data frame. Then we added an "id" (1, 2, ..., 100) and a "response" column. The latter contains two different integer values to indicate which class each observation comes from, and the plots provide a visual illustration of the structural difference between the two classes.
+
+```{r,cache=TRUE,message=FALSE,warning=FALSE}
+## Create a custom function that generates and processes data from SBM
+generate_data_SBM=function(q,n,m1,m2){
+  ## Stochastic block model
+  ## Generate a network with K communities and n nodes
+  ## Define all variables
+  K = 5
+  Adj_list_1 <- list() # Adjacency lists for the 2 classes
+  Adj_list_2 <- list()
+  SBM_results <- list()
+
+  ## Define the block model
+  z = kronecker(1:5, rep(1, n/K))
+  p1 = 0.5
+  p2 = 0.1
+  B = (p1 - p2) *diag(K) + p2 ## Default value of q is 0
+
+  ## Class 1
+  for(i in 1:m1){
+    sbm <- sample_sbm(n, B, block.sizes = rep(n/K, K))
+    Adj_list_1[[i]] <- get.adjacency(sbm)
+  }
+  
+  SBM_results$adj_1=Adj_list_1 # Store adjacency list for Class 1
+
+  ## Class 2
+  ## First change one of the sub-blocks using the value of q for Class 2
+  B[1,3] = q
+  B[3, 1] = q
+
+  for(j in 1:m2){
+    sbm <- sample_sbm(n, B, block.sizes = rep(n/K, K))
+    Adj_list_2[[j]] <- get.adjacency(sbm)
+  }
+  
+  SBM_results$adj_2=Adj_list_2 # Store adjacency list for Class 2
+
+  ## Simulated data:
+  Adj_list <- c(Adj_list_1, Adj_list_2)
+  class_label <- c(rep(1, m1), rep(-1, m2))
+
+  ## Convert to a 100 x 4950 dataframe
+  SBM_sims_df=c() # List of all sims
+  SBM_sims_df=Reduce(rbind, lapply(Adj_list, matrix_to_vec))
+  SBM_sims_df=as.data.frame(SBM_sims_df)
+
+  ## Adding columns for response variable and id
+  SBM_sims_df$id=c(1:100)
+  SBM_sims_df$response=class_label
+  SBM_sims_df=SBM_sims_df[,c(4951,4952,1:4950)] # Rearranging the data so that the id and response show up as the first and second columns of the data frame, respectively
+  
+  SBM_results$df=SBM_sims_df
+
+  return(SBM_results)
+}
+
+## Generate the data set
+set.seed(45)
+SBM_sims=generate_data_SBM(q=0.4,n=100,m1=50,m2=50)
+SBM_sims_df=SBM_sims$df
+
+
+## Plot the adjacency list for the two classes
+levelplot(SBM_sims$adj_1)
+levelplot(SBM_sims$adj_2)
+```
+
+## Training and Testing Net Random Forest (NRF) Models
+
+In this step, we will evaluate and compare the prediction performances of four different random forest models, two of which integrate spectral clustering. We named the latter models as Net Random Forest (NRF) and categorized them based on where the spectral clustering is performed: Net Random Forest Ver. 1 (NRF1) implements clustering outside of all trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree. The other two types of random forest models are the following: (standard) Random Forest and Randomer Forest (RerF), which constructs recursive binary hyperplanes that are not necessarily axis-aligned. We will use the netRandomForest::nrf1_training, netRandomForest::nrf2_training, randomForest::randomForest, and rerf::RerF functions to train forests with B = 10 trees, importance set to "TRUE" in the randomForest() function (the variable importances for NRF1 and NRF2 will be manually calculated - more details in the next section; however, we will not be analyzing variable importance for RerF), m = sqrt(p) for Random Forest, m = 0.8*n for both NRF models, and an unspecified m for Rerf (m represents the number of candidate variables at each split). The number of clusters for the spectral clustering algorithm in the NRF models will be fixed at 3. [Note: I could not find a parameter that allows the programmer to specify m in RerF() function]. 
+
+As for the data partition process for training and testing the above models, we will implement data splitting (75% training and 25% testing), stratified on the response variable, and the splits will remain the same for all 5 replications. Each rep is a newly generated SBM data set for q values ranging from 0.2 to 0.5.
+
+```{r,cache=TRUE,message=FALSE,warning=FALSE}
+## Perform data splitting 
+testing_data_ind = createDataPartition(SBM_sims_df$response, p = .25, list = FALSE) %>% as.vector(.)
+training_data_ind = (1:nrow(SBM_sims_df))[-testing_data_ind]
+
+## Create a matrix to store the results of the simulation to later be converted to a dataframe object
+### col 1 = "Sim", col 2 = "q value" (0.2-0.5, inclusive), col 3 = "RF" (Standard RF model), col 4 = "NRF1" (RF model with clustering outside the trees), col 5 = "NRF2" (RF model with clustering within each tree), col 6 = "RerF" (Randomer Forest model)
+
+rf_methods_all=matrix(ncol=6,nrow=5*4) # 5 reps * 4 different q values
+
+## Define constant variables outside of all loops
+num_clusters=3
+index=0 # Initializing row index for the rf_methods_all table
+
+## Obtain the accuracies for a given p1 value, then populate the sims table
+for(j in c(1:5)){ # 5 replications
+  
+  q_vals=c(.2,.3,.4,.5)
+  
+  for(i in 1:length(q_vals)){
+    
+    index=index+1
+    
+    rf_methods_all[index,1]=j # Store sim number
+    
+    q=q_vals[i]
+    rf_methods_all[index,2]=q
+    
+    ## Randomly generate a dataset
+    set.seed(j)
+    SBM_sims_df=generate_data_SBM(q=q,n=100,m1=50,m2=50)
+    
+    ## Method 1: Standard random forest
+  
+    training_data=SBM_sims_df[training_data_ind,]
+    testing_data=SBM_sims_df[testing_data_ind,]
+        
+    ## Train classifier on training data 
+    set.seed(45)
+    rf_mod1 <- randomForest(x=training_data[,c(3:ncol(training_data))],
+                       y=factor(training_data[,2]),
+                       ntree=10,
+                       importance=TRUE)
+        
+    ## Test classifier on testing data
+    test=predict(rf_mod1,newdata=testing_data[,c(3:ncol(testing_data))],type='response')
+    
+    ## Store results
+    rf_methods_all[index,3]=1-mean(test != testing_data$response) # Store classification accuracy of the standard RF method
+    
+  
+    ## Method 2: Custom random forest method with cluster outside the trees
+        
+    rf_mod2=nrf1_training(B=10,n=length(training_data_ind),X_training=training_data[,c(3:ncol(training_data))],Y_training=training_data$response,num_clusters=num_clusters,prop_X=.8,method="class")
+    
+    test=nrf1_testing(X_testing=testing_data[,c(3:ncol(testing_data))],Y_testing=testing_data$response,nrf1_mod=rf_mod2,num_clusters=num_clusters,method="class")
+    
+    rf_methods_all[index,4]=1-mean(test != testing_data$response)
+  
+    
+    ## Method 3: Custom random forest method with cluster within the trees
+        
+    rf_mod3=nrf2_training(B=10,n=length(training_data_ind),X_training=training_data[,c(3:ncol(training_data))],Y_training=training_data$response,num_clusters=num_clusters,prop_X=.8,method="class") 
+    test=nrf2_testing(X_testing=testing_data[,c(3:ncol(testing_data))],Y_testing=testing_data$response,nrf2_mod=rf_mod3,num_clusters=num_clusters,method="class")
+    
+    rf_methods_all[index,5]=1-mean(test != testing_data$response)
+    
+    
+    ## Method 4: RerF
+    
+    rf_mod4 <- RerF(X=training_data[,c(3:ncol(training_data))], 
+                    Y=factor(training_data$response), 
+                    trees=10,
+                    num.cores = 1L,
+                    seed = 45)
+    
+    test <- Predict(testing_data[,c(2:ncol(testing_data))], rf_mod4, num.cores = 1L, Xtrain = 
+                    training_data[,c(3:ncol(training_data))])
+    
+    rf_methods_all[index,6] <- 1-mean(test != testing_data$response)
+  }
+}
+
+## Convert to a dataframe object, add column names, and display the results (should only have the first 5 rows populated so far since I only did one sim)
+rf_methods_all=data.frame(rf_methods_all)
+colnames(rf_methods_all)=c("Sim","q_value","RF","NRF1","NRF2","RerF")
+
+## Convert the dataframe object from wide to long format to plot the results
+rf_methods_allw=rf_methods_all
+rf_methods_allw=rf_methods_allw %>%
+                  group_by(q_value) %>%
+                  summarise(RF.Mean = mean(RF),RF.SD = sd(RF), NRF1.Mean = mean(NRF1),NRF1.SD = 
+                            sd(NRF1), NRF2.Mean = mean(NRF2),NRF2.SD = sd(NRF2),
+                            RerF.Mean = mean(RerF),RerF.SD = sd(RerF))
+
+rf_methods_alll=rf_methods_allw %>% 
+                  gather(v, value, RF.Mean:RerF.SD) %>% 
+                  separate(v, c("RF_Method", "col")) %>% 
+                  arrange(q_value) %>% 
+                  spread(col, value)
+
+## Display the results
+rf_methods_alll
+
+
+## Graphing the results
+ggplot(rf_methods_alll,aes(x=q_value,y=Mean,colour=RF_Method,group=RF_Method)) +
+  geom_line(size=1) +
+  labs(title = "Random Forest Models vs. q Value\n", 
+       x = "q Value", 
+       y = "Mean Classification Accuracy", 
+       color = "RF Method\n") +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+
+## Variable Importance
+
+
