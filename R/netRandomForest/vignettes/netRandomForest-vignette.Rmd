@@ -77,7 +77,7 @@ generate_data_SBM=function(q,n,m1,m2){
     Adj_list_1[[i]] <- get.adjacency(sbm)
   }
   
-  SBM_results$adj_1=Adj_list_1 # Store adjacency list for Class 1
+  SBM_results$adj_1=Adj_list_1[[1]] # Store adjacency list for Class 1
 
   ## Class 2
   ## First change one of the sub-blocks using the value of q for Class 2
@@ -89,7 +89,7 @@ generate_data_SBM=function(q,n,m1,m2){
     Adj_list_2[[j]] <- get.adjacency(sbm)
   }
   
-  SBM_results$adj_2=Adj_list_2 # Store adjacency list for Class 2
+  SBM_results$adj_2=Adj_list_2[[1]] # Store adjacency list for Class 2
 
   ## Simulated data:
   Adj_list <- c(Adj_list_1, Adj_list_2)
@@ -117,15 +117,15 @@ SBM_sims_df=SBM_sims$df
 
 
 ## Plot the adjacency list for the two classes
-levelplot(SBM_sims$adj_1)
-levelplot(SBM_sims$adj_2)
+levelplot(as.matrix(SBM_sims$adj_1))
+levelplot(as.matrix(SBM_sims$adj_2))
 ```
 
 ## Training and Testing Net Random Forest (NRF) Models
 
-In this step, we will evaluate and compare the prediction performances of four different random forest models, two of which integrate spectral clustering. We named the latter models as Net Random Forest (NRF) and categorized them based on where the spectral clustering is performed: Net Random Forest Ver. 1 (NRF1) implements clustering outside of all trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree. The other two types of random forest models are the following: (standard) Random Forest and Randomer Forest (RerF), which constructs recursive binary hyperplanes that are not necessarily axis-aligned. We will use the netRandomForest::nrf1_training, netRandomForest::nrf2_training, randomForest::randomForest, and rerf::RerF functions to train forests with B = 10 trees, importance set to "TRUE" in the randomForest() function (the variable importances for NRF1 and NRF2 will be manually calculated - more details in the next section; however, we will not be analyzing variable importance for RerF), m = sqrt(p) for Random Forest, m = 0.8*n for both NRF models, and an unspecified m for Rerf (m represents the number of candidate variables at each split). The number of clusters for the spectral clustering algorithm in the NRF models will be fixed at 3. [Note: I could not find a parameter that allows the programmer to specify m in RerF() function]. 
+In this step, we will evaluate and compare the prediction performances of four different random forest models, two of which integrate spectral clustering. We named the latter models as Net Random Forest (NRF) and categorized them based on where the spectral clustering is performed: Net Random Forest Ver. 1 (NRF1) implements clustering outside of all trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree. The other two types of random forest models are the following: (standard) Random Forest and Randomer Forest (RerF), which constructs recursive binary hyperplanes that are not necessarily axis-aligned. We will use the netRandomForest::nrf1_training, netRandomForest::nrf2_training, randomForest::randomForest, and rerf::RerF functions to train forests with B = 10 trees, importance set to "TRUE" in the randomForest() function (the variable importances for NRF2 will be manually calculated - more details in the next section; however, we will not be analyzing variable importance for RerF and NRF1), m = sqrt(p) for Random Forest, m = 0.8*n for both NRF models, and an unspecified m for Rerf (m represents the number of candidate variables at each split). The number of clusters for the spectral clustering algorithm in the NRF models will be fixed at 3. [Note: I could not find a parameter that allows the programmer to specify m in RerF() function]. 
 
-As for the data partition process for training and testing the above models, we will implement data splitting (75% training and 25% testing), stratified on the response variable, and the splits will remain the same for all 5 replications. Each rep is a newly generated SBM data set for q values ranging from 0.2 to 0.5.
+As for the data partition process for training and testing the above models, we will implement data splitting (75% training and 25% testing), stratified on the response variable, and the splits will remain the same for all 5 replications. Each rep is a newly generated SBM data set for q values ranging from 0.2 to 0.5. As the q value increases, the two classes of the SBM data will become more distinguishable and, hence, should result in better classification accuracy across all RF models.
 
 ```{r,cache=TRUE,message=FALSE,warning=FALSE}
 ## Perform data splitting 
@@ -157,7 +157,8 @@ for(j in c(1:5)){ # 5 replications
     
     ## Randomly generate a dataset
     set.seed(j)
-    SBM_sims_df=generate_data_SBM(q=q,n=100,m1=50,m2=50)
+    SBM_sims=generate_data_SBM(q=q,n=100,m1=50,m2=50)
+    SBM_sims_df=SBM_sims$df
     
     ## Method 1: Standard random forest
   
@@ -242,7 +243,132 @@ ggplot(rf_methods_alll,aes(x=q_value,y=Mean,colour=RF_Method,group=RF_Method)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
+From this plot, we can see that the both the NRF1 and NRF2 methods significantly outperforms all the other random forest methods with perfect classification at q values of 0.3 to 0.5.
 
-## Variable Importance
 
+## Variable Importance and Classification Performance
+
+Now that we have assessed the predictive performance of four different random forest methods, we will now identify and visualize the important variables (i.e. predictors that have more influence on the response) from the NRF2 and standard RF models. These quantities will be computed using the following variable importance metric: mean decrease in the Gini index of node impurity by splits for each variable. In simpler terms, this is a measure of how well a variable (or node) of a decision tree classifies the data every time a split is introduced to it and is averaged across all trees that select the variable as a split candidate in the random forest. However, as previoiusly mentioned, manual calculations will be required for aggregating the gini impurity of each variable in the NRF2 model since the netRandomForest::nrf2_training function only returns the variable importances for each tree separately. This process will be repeated for various q values at K=5 clusters. 
+
+After calculating the variable importances for both models, we also measured their classification performance in terms of the 'degree' of importance for each variable (scaled to be between 0 to 1) relative to those of the 'true' matrix (i.e. how 'well' the variables match up with those of the 'true' matrix in regards to their mean decrease in gini impurity). The latter is defined as a matrix that contains 1's within the (3,1) and (1,3) "block" regions and 0's everywhere else. This performance can be visually detected by an ROC curve, which is computed for each q value. More specifically, we would expect that larger q values would yield ROC curves that are closer to the upper-left corner and are associated with better classifiers. 
+
+```{r}
+## Obtain variable importance measures at K=5 clusters and q=0.2...0.5 for NRF2 (B=10) and the standard RF (B=1000) models. Compare their classification performances based on how 'close' the importance variables match up with those of the 'true' matrix
+num_clusters=5
+
+## Function for scaling a feature to have a range of 0 to 1
+range01 <- function(x){(x-min(x))/(max(x)-min(x))}
+## Citation: https://stackoverflow.com/questions/5665599/range-standardization-0-to-1-in-r
+## [Note: Is this is how I would include citations within vignettes?]
+
+## Define the 'true' matrix; that is, the matrix with perfect assignment of important variables
+correct_mat=matrix(0,100,100)
+correct_mat[c(0:20),c(40:60)]=1; correct_mat[c(40:60),c(0:20)]=1
+plot_adjmatrix(correct_mat)
+
+for(q in 1:length(q_vals)){
+  
+  ## Randomly generate a dataset
+  set.seed(q)
+  SBM_sims=generate_data_SBM(q=q_vals[q],n=100,m1=50,m2=50)
+  SBM_sims_df=SBM_sims$df
+  
+  training_data=SBM_sims_df[training_data_ind,]
+  testing_data=SBM_sims_df[testing_data_ind,]
+  
+  NRF2_mod=nrf2_training(B=10,n=length(training_data_ind),X_training=training_data[,c(3:ncol(training_data))],Y_training=training_data$response,num_clusters=num_clusters,prop_X=.8,method="class")
+  
+  vec_VI_list=list() # Define a list that stores the variable importances of each tree in the NRF2 model
+  VI_mat=matrix(0,100,100); V_mat=matrix(0,100,100); S_mat=matrix(0,100,100) # Initialize V, VI, and S matrices
+  
+  ## Create a dataframe that scores all the variable importances from each tree
+  VI_df=data.frame(matrix(0,nrow=10,ncol=(num_clusters*(num_clusters-1))/2 + num_clusters))
+  
+  for(b in 1:length(NRF2_mod$rf)){
+    ## Create a matrix Z that indicates which cluster each node/observation belongs to
+    ## Obtain the clustering memberships of all training data based on bth tree
+    Z_mat=matrix(0,100,num_clusters)
+    included_vert=NRF2_mod$m[[b]]
+    for(i in c(1:80)){
+      clust_num=NRF2_mod$clusters[[b]][i]
+      if(clust_num==1){
+        Z_mat[included_vert[i],1]=1
+      } else if (clust_num==2){
+        Z_mat[included_vert[i],2]=1
+      } else if (clust_num==3){
+        Z_mat[included_vert[i],3]=1
+      } else if (clust_num==4){
+        Z_mat[included_vert[i],4]=1
+      } else {
+        Z_mat[included_vert[i],5]=1
+      }
+    }
+    
+    vec_VI=NRF2_mod$rf[[b]]$variable.importance
+    df_importance = data.frame(matrix(0, ncol = 15))
+    df_importance[, names(vec_VI)]=vec_VI
+    vec_VI_list[[b]]=as.numeric(df_importance)
+    
+    ## Create the C matrix
+    C_mat <- matrix(0, num_clusters, num_clusters)
+    C_mat[upper.tri(C_mat, diag = TRUE)] = vec_VI_list[[b]]
+    C_mat=C_mat+t(C_mat)
+    diag(C_mat)=diag(C_mat)/2
+    
+    ## Do a cumulative elementwise sum of all entries of each matrix
+    V_mat=V_mat+(Z_mat %*% C_mat %*% t(Z_mat))
+    S_mat=S_mat+tcrossprod(rowSums(Z_mat))
+  }
+  
+  ## Find the means VI's for all nodes in the training set
+  for(i in 1:nrow(V_mat)){
+    for(j in 1:ncol(V_mat)){
+      if(S_mat[i,j]!=0){
+        VI_mat[i,j]=V_mat[i,j]/S_mat[i,j]
+      }
+    }
+  }
+  
+  ## Scale VI_mat
+  VI_mat=range01(VI_mat)
+  
+  ## Obtain the same plot for standard RF algorithm
+  set.seed(45)
+  standard_rf_mod <- randomForest(x=training_data[,c(3:ncol(training_data))],
+                         y=factor(training_data[,2]),
+                         ntree=1000,
+                         importance=TRUE)
+  scaled_rf_importance=range01(standard_rf_mod$importance[,4])
+  
+  ## Obtain the binary matrix (predicted matrix) by subsetting the original variable importance matrix (which is plotted) by variables selected from a given threshold, tau; the 'true' matrix will contain 0's everywhere with 1's within the (3,1) and (1,3) block regions
+  
+  ## Plot ROC curve for NRF2
+  pred_NRF2 <- prediction(matrix_to_vec(VI_mat), matrix_to_vec(correct_mat))
+  perf_NRF2 <- performance(pred_NRF2,"tpr","fpr")
+  plot(perf_NRF2, col="red")
+  
+  ## Plot ROC curve for standard RF
+  pred_RF <- prediction(scaled_rf_importance, matrix_to_vec(correct_mat))
+  perf_RF <- performance(pred_RF,"tpr","fpr")
+  plot(perf_RF,add=TRUE,col="blue")
+  
+  ## Add Legend
+  legend("bottomright", c("NRF2", "RF"), lty=1, 
+      col = c("red", "blue"), bty="n")
+  
+  title_name=paste("q =",q_vals[q])
+  
+  ## Add title 
+  title(main = title_name)
+}
+```
+Indeed, the above hypothesis is confirmed by the plotted ROC curves with NRF2 consistently having better performance than the standard RF model. 
+
+```{r}
+## Plot the predicted matrices of NRF2 and standard RF at q=0.4, respectively
+plot_adjmatrix(VI_mat)
+plot_adjmatrix(scaled_rf_importance)
+```
+
+The predicted matrices of both models also indicate that the (3,1); (1,3) 'blocks' are much more distinguishable from all the other regions for NRF2 compared to those of the standard RF model.
 
