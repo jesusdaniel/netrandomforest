@@ -21,6 +21,7 @@ knitr::opts_chunk$set(
 )
 ```
 
+## JA: split the following packages into blocks, and introduce comments to explain why you need each package (simulations, comparisons, etc.)
 ```{r setup,message=FALSE,warning=FALSE}
 ## Required libraries
 library(netRandomForest)
@@ -49,6 +50,8 @@ source("../../extra_functions.R")
 ```
 
 ## Data
+
+## JA: whenever you mention a function or code variable in the text, use \texttt{functionName} to make the background look gray. You can also use dollar signs for equations and mathematical variables, like $n\times (n-1)$.
 
 To reiterate, the data is generated in R through a simulation of 100 networks from the SBM and simultaneously pre-processed within the generate_data_SBM custom function. The processed data set contains a very large number of binary predictors (0 or 1) and a binary response (1 for Class 1 or -1 for Class 2). The number of predictors is based on the number of vertices/nodes (n) in each of the generated SBM undirected graphs. In this case, we have n = 100 for our simulations, so the total number of variables is (n*(n-1))/2 = (100 x 99)/2 = 4950. There are three main goals to the overall analyses performed in this vignette: implement spectral clustering within random forest models to enhance the efficiency and quality of predictions, given the high dimensionality of this data set, identify important "blocks" or communities within the SBM data (using Gini-based variable importance metrics), and how "close" the important variables are to those of the true simulation (a performance measure gauged by the ROC curve). [Note: I don't think I did a great job explaining the variable importance portion.]
 
