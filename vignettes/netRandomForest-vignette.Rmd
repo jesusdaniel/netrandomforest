@@ -1,16 +1,16 @@
 ---
-title: "Spectral Clustering Dimensional Reduction Within Random Forest Models"
+title: "Random Forests for network-valued covariates"
 author: Tiffany Chang
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Spectral Clustering Dimensional Reduction Within Random Forest Models}
+  %\VignetteIndexEntry{Random Forests for network-valued covariates}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
 
 ## Introduction
 
-This vignette is designed to explain in-depth about the purpose and usage of the netRandomForest package. Overall, it is used to perform spectral clustering within a random forest model in order to reduce the dimensionality of a data set with a large number of predictors. In this document, it is built on R simulated data from the Stochastic Block Model (SBM). The net random forest models are meant to reduce the running time for classifying each observation to one of the two categories of the binary response of interest (more details in the next section), despite having potentially thousands of predictors in the SBM data set. Thus, this example demonstrates a classification problem that integrates dimensional reduction to achieve maximum efficiency while retaining a reasonable predictive performance.
+This vignette is designed to explain in-depth the purpose and usage of the netRandomForest package. Overall, this package implements a random forest methodology for network-valued covariates based on clustering and dimensionalityreduction. This document illustrates the methodology and the usage of this package on simulated data from the Stochastic Block Model (SBM). The network random forest methods are meant to improve accuracy and reduce the running time for prediction and classification. This example demonstrates a classification problem that integrates dimensional reduction to achieve maximum efficiency while retaining a reasonable predictive performance.
 
 We will use the following packages and source files:
 
