@@ -3,7 +3,7 @@ Type: Package
 Title: Spectral Clustering Dimensional Reduction Within Random Forest Models
 Version: 0.1.0
 Author: Tiffany Chang
-Maintainer: Jesús Daniel Arroyo Relión <jarroyo@tamu.edu>
+Maintainer: Jesús Arroyo <jarroyo@tamu.edu>
 Description: This package contains two modified random forest models that perform spectral clustering. This modification effectively performs dimensional reduction to enhance the efficiency of the original random forest model on both the training and testing data.    Net Random Forest Ver. 1 (NRF1) implements clustering outside of the trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree.
 Import: rpart
 License: GPL-2
