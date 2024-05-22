@@ -24,9 +24,12 @@ knitr::opts_chunk$set(
 ## JA: split the following packages into blocks, and introduce comments to explain why you need each package (simulations, comparisons, etc.)
 ```{r setup,message=FALSE,warning=FALSE}
 ## Required libraries
+## Load library
 library(netRandomForest)
+## Methods for comparison
 library(randomForest)
 library(rerf)
+
 library(Matrix)
 library(MASS)
 library(lattice)
