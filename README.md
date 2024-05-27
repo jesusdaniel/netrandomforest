@@ -5,4 +5,4 @@ Original code written by Tiffany Chang and helper functions (ase, cluster_testin
 
 # R Code
 
-The netRandomForest package implements spectral clustering in two different ways within the standard random forest model.
+The netRandomForest package implements spectral clustering in two different ways within the standard random forest model. More details within the help files (e.g. ?nrf1_training)
