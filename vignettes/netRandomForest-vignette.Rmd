@@ -51,8 +51,8 @@ library(ROCR) # To analyze the performance of binary classifiers (random forests
 
 ```{r message=FALSE,warning=FALSE}
 ## Source functions
-source("../../Plots.R") # Plots adjacency matrix objects
-source("../../extra_functions.R") # For vectorizing a matrix object
+source("Plots.R") # Plots adjacency matrix objects
+source("extra_functions.R") # For vectorizing a matrix object
 ```
 
 ## Data
