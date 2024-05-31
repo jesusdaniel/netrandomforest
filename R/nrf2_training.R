@@ -13,6 +13,8 @@
 #' @return A trained net random forest model that contains the predicted response values,
 #' clustering memberships as well as a list of trees and selected features used in each tree.
 #'
+#' See the vignette for examples.
+#'
 #' @export
 
 nrf2_training=function(B,n,X_training,Y_training,num_clusters,prop_X=.8,method){

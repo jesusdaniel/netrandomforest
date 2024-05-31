@@ -10,6 +10,8 @@
 #'
 #' @return A vector of predicted response values from the testing set.
 #'
+#' See the vignette for examples.
+#'
 #' @export
 
 nrf2_testing=function(X_testing,Y_testing,nrf2_mod,num_clusters,method){ # nrf2_mod contains the trees ($rf), predicted values ($pred_vals), selected vertices ($m), and clustering instructions ($clusters) from training data
