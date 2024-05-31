@@ -1,5 +1,5 @@
 ---
-title: "Random Forests for network-valued covariates"
+title: "Random Forests for Network-Valued Covariates"
 author: Tiffany Chang
 output: rmarkdown::html_vignette
 vignette: >
@@ -10,7 +10,7 @@ vignette: >
 
 ## Introduction
 
-This vignette is designed to explain in-depth the purpose and usage of the netRandomForest package. Overall, this package implements a random forest methodology for network-valued covariates based on clustering and dimensionalityreduction. This document illustrates the methodology and the usage of this package on simulated data from the Stochastic Block Model (SBM). The network random forest methods are meant to improve accuracy and reduce the running time for prediction and classification. This example demonstrates a classification problem that integrates dimensional reduction to achieve maximum efficiency while retaining a reasonable predictive performance.
+This vignette is designed to explain in-depth the purpose and usage of the `netRandomForest` package. Overall, this package implements a random forest methodology for network-valued covariates based on clustering and dimensionality reduction. This document illustrates the methodology and the usage of this package on simulated data from the Stochastic Block Model (SBM). The network random forest methods are meant to improve accuracy and reduce the running time for prediction and classification. This example demonstrates a classification problem that integrates dimensional reduction to achieve maximum efficiency while retaining a reasonable predictive performance.
 
 We will use the following packages and source files:
 
@@ -21,44 +21,45 @@ knitr::opts_chunk$set(
 )
 ```
 
-## JA: split the following packages into blocks, and introduce comments to explain why you need each package (simulations, comparisons, etc.)
+
 ```{r setup,message=FALSE,warning=FALSE}
 ## Required libraries
-## Load library
-library(netRandomForest)
-## Methods for comparison
-library(randomForest)
-library(rerf)
+library(netRandomForest) # Random forests of interest (NRF1 and NRF2)
 
-library(Matrix)
+## Other random forest methods for comparison
+library(randomForest) # Standard random forest
+library(rerf) # Generalization of the standard random forest
+
+## These packages support tools/functions for data visualization (especially for neural network data), cleaning, pre-processing, and assessment of model performance
+library(Matrix) # Manipulation of matrix objects
 library(MASS)
-library(lattice)
+library(lattice) # For plotting the two classes of SBM simulations
 library(igraphdata)
-library(igraph)
+library(igraph) # For generating the SBM simulation data and modifying graph objects
 library(sand)
 library(devtools)
-library(dplyr)
-library(caret)
+library(dplyr) # For processing the data into a desirable format
+library(tidyr) # For more advanced data processing
+library(caret) # For performing stratified k-fold cross validation
 library(naniar)
-library(tidyr)
-library(ggplot2)
+library(ggplot2) # Data visualization (e.g. multi-line graph)
 library(reshape2)
 library(rARPACK)
 library(varhandle)
-library(ROCR)
+library(ROCR) # To analyze the performance of binary classifiers (random forests, in this case)
+```
 
+```{r message=FALSE,warning=FALSE}
 ## Source functions
-source("../../Plots.R")
-source("../../extra_functions.R")
+source("../../Plots.R") # Plots adjacency matrix objects
+source("../../extra_functions.R") # For vectorizing a matrix object
 ```
 
 ## Data
 
-## JA: whenever you mention a function or code variable in the text, use \texttt{functionName} to make the background look gray. You can also use dollar signs for equations and mathematical variables, like $n\times (n-1)$.
+To reiterate, the data is generated in R through a simulation of 100 networks from the SBM and simultaneously pre-processed within the `generate_data_SBM` custom function. The processed data set contains a very large number of binary predictors (0 or 1) and a binary response (1 for Class 1 or -1 for Class 2). The number of predictors is based on the number of vertices/nodes ($n$) in each of the generated SBM undirected graphs. In this case, we have $n = 100$ for our simulations, so the total number of variables is $(n\times(n-1))/2 = (100\times 99)/2 = 4950$. There are three main goals to the overall analyses performed in this vignette: implement spectral clustering within random forest models to enhance the efficiency and quality of predictions, given the high dimensionality of this data set, identify important "blocks" or communities within the SBM data (using Gini-based variable importance metrics), and how "close" the important variables are to those of the true simulation (a performance measure gauged by the ROC curve). [Note: I don't think I did a great job explaining the variable importance portion.]
 
-To reiterate, the data is generated in R through a simulation of 100 networks from the SBM and simultaneously pre-processed within the generate_data_SBM custom function. The processed data set contains a very large number of binary predictors (0 or 1) and a binary response (1 for Class 1 or -1 for Class 2). The number of predictors is based on the number of vertices/nodes (n) in each of the generated SBM undirected graphs. In this case, we have n = 100 for our simulations, so the total number of variables is (n*(n-1))/2 = (100 x 99)/2 = 4950. There are three main goals to the overall analyses performed in this vignette: implement spectral clustering within random forest models to enhance the efficiency and quality of predictions, given the high dimensionality of this data set, identify important "blocks" or communities within the SBM data (using Gini-based variable importance metrics), and how "close" the important variables are to those of the true simulation (a performance measure gauged by the ROC curve). [Note: I don't think I did a great job explaining the variable importance portion.]
-
-It is important to note that for each individual SBM simulation, the block model was pre-specified to have five communities (a 5 x 5 "block" matrix) with the diagonal blocks having a probability of 0.5 (p1) and the off-diagonal blocks having a probability of 0.1 (p2) [Note: Not sure if I am explaining this right]. These probabilities represent the likelihood of two different nodes having a shared edge within a certain community (1 if a pair of node is connected, and 0 otherwise). We define another probability, q, that is designated for generating different "classes" of SBM simulations by effectively changing one of the off-diagonal blocks to have a probability of greater than p1 and less than or equal to p2. For demonstration purposes below, we set q to be 0 for Class 1 and 0.4 for Class 2. The data was originally a list of 100 SBM graphs that were converted to adjacency matrices, 50 from Class 1 (m1) and the other 50 from Class 2 (m2). In order to pre-process the raw data into a suitable form for fitting machine learning algorithms in R, all elements in the upper diagonal of each adjacency matrix was converted to a vector in major-column order. This means that the columns or predictors of the resulting data frame represents the connectivity of all unique pairwise combinations of the nodes. We repeated this process until we obtain 100 vectors (observations) and combine them (row-wise) into an R data frame. Then we added an "id" (1, 2, ..., 100) and a "response" column. The latter contains two different integer values to indicate which class each observation comes from, and the plots provide a visual illustration of the structural difference between the two classes.
+It is important to note that for each individual SBM simulation, the block model was pre-specified to have five communities (a $5\times 5$ "block" matrix) with the diagonal blocks having a probability of 0.5 ($p_1$) and the off-diagonal blocks having a probability of 0.1 ($p_2$) [Note: Not sure if I am explaining this right]. These probabilities represent the likelihood of two different nodes having a shared edge within a certain community (1 if a pair of node is connected, and 0 otherwise). We define another probability, $q$, that is designated for generating different "classes" of SBM simulations by effectively changing one of the off-diagonal blocks to have a probability of greater than $p_1$ and less than or equal to $p_2$. For demonstration purposes below, we set q to be 0 for Class 1 and 0.4 for Class 2. The data was originally a list of 100 SBM graphs that were converted to adjacency matrices, 50 from Class 1 ($m_1$) and the other 50 from Class 2 ($m_2$). In order to pre-process the raw data into a suitable form for fitting machine learning algorithms in R, all elements in the upper diagonal of each adjacency matrix was converted to a vector in major-column order. This means that the columns or predictors of the resulting data frame represents the connectivity of all unique pairwise combinations of the nodes. We repeated this process until we obtain 100 vectors (observations) and combine them (row-wise) into an R data frame. Then we added an `id` (1, 2, ..., 100) and a `response` column. The latter contains two different integer values to indicate which class each observation comes from, and the plots provide a visual illustration of the structural difference between the two classes.
 
 ```{r,cache=TRUE,message=FALSE,warning=FALSE}
 ## Create a custom function that generates and processes data from SBM
@@ -129,9 +130,9 @@ levelplot(as.matrix(SBM_sims$adj_2))
 
 ## Training and Testing Net Random Forest (NRF) Models
 
-In this step, we will evaluate and compare the prediction performances of four different random forest models, two of which integrate spectral clustering. We named the latter models as Net Random Forest (NRF) and categorized them based on where the spectral clustering is performed: Net Random Forest Ver. 1 (NRF1) implements clustering outside of all trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree. The other two types of random forest models are the following: (standard) Random Forest and Randomer Forest (RerF), which constructs recursive binary hyperplanes that are not necessarily axis-aligned. We will use the netRandomForest::nrf1_training, netRandomForest::nrf2_training, randomForest::randomForest, and rerf::RerF functions to train forests with B = 10 trees, importance set to "TRUE" in the randomForest() function (the variable importances for NRF2 will be manually calculated - more details in the next section; however, we will not be analyzing variable importance for RerF and NRF1), m = sqrt(p) for Random Forest, m = 0.8*n for both NRF models, and an unspecified m for Rerf (m represents the number of candidate variables at each split). The number of clusters for the spectral clustering algorithm in the NRF models will be fixed at 3. [Note: I could not find a parameter that allows the programmer to specify m in RerF() function]. 
+In this step, we will evaluate and compare the prediction performances of four different random forest models, two of which integrate spectral clustering. We named the latter models as Net Random Forest (NRF) and categorized them based on where the spectral clustering is performed: Net Random Forest Ver. 1 (NRF1) implements clustering outside of all trees while Net Random Forest Ver. 2 (NRF2) implements clustering within each tree. The other two types of random forest models are the following: (standard) Random Forest and Randomer Forest (RerF), which constructs recursive binary hyperplanes that are not necessarily axis-aligned. We will use the `netRandomForest::nrf1_training`, `netRandomForest::nrf2_training`, `randomForest::randomForest`, and `rerf::RerF` functions to train forests with $B = 10$ trees, importance set to `TRUE` in the `randomForest()` function (the variable importances for NRF2 will be manually calculated - more details in the next section; however, we will not be analyzing variable importance for RerF and NRF1), $m = \sqrt p$ for Random Forest, $m = 0.8 \times n$ for both NRF models, and an unspecified $m$ for Rerf ($m$ represents the number of candidate variables at each split). The number of clusters for the spectral clustering algorithm in the NRF models will be fixed at 3. [Note: I could not find a parameter that allows the programmer to specify m in RerF() function]. 
 
-As for the data partition process for training and testing the above models, we will implement data splitting (75% training and 25% testing), stratified on the response variable, and the splits will remain the same for all 5 replications. Each rep is a newly generated SBM data set for q values ranging from 0.2 to 0.5. As the q value increases, the two classes of the SBM data will become more distinguishable and, hence, should result in better classification accuracy across all RF models.
+As for the data partition process for training and testing the above models, we will implement data splitting (75% training and 25% testing), stratified on the response variable, and the splits will remain the same for all 5 replications. Each rep is a newly generated SBM data set for $q$ values ranging from 0.2 to 0.5. As the $q$ value increases, the two classes of the SBM data will become more distinguishable and, hence, should result in better classification accuracy across all RF models.
 
 ```{r,cache=TRUE,message=FALSE,warning=FALSE}
 ## Perform data splitting 
@@ -217,7 +218,7 @@ for(j in c(1:5)){ # 5 replications
   }
 }
 
-## Convert to a dataframe object, add column names, and display the results (should only have the first 5 rows populated so far since I only did one sim)
+## Convert to a dataframe object, add column names, and display the results
 rf_methods_all=data.frame(rf_methods_all)
 colnames(rf_methods_all)=c("Sim","q_value","RF","NRF1","NRF2","RerF")
 
@@ -249,16 +250,16 @@ ggplot(rf_methods_alll,aes(x=q_value,y=Mean,colour=RF_Method,group=RF_Method)) +
   theme(plot.title = element_text(hjust = 0.5))
 ```
 
-From this plot, we can see that the both the NRF1 and NRF2 methods significantly outperforms all the other random forest methods with perfect classification at q values of 0.3 to 0.5.
+From this plot, we can see that both the NRF1 and NRF2 methods significantly outperforms all the other random forest methods with perfect classification at $q$ values of 0.3 to 0.5.
 
 
 ## Variable Importance and Classification Performance
 
-Now that we have assessed the predictive performance of four different random forest methods, we will now identify and visualize the important variables (i.e. predictors that have more influence on the response) from the NRF2 and standard RF models. These quantities will be computed using the following variable importance metric: mean decrease in the Gini index of node impurity by splits for each variable. In simpler terms, this is a measure of how well a variable (or node) of a decision tree classifies the data every time a split is introduced to it and is averaged across all trees that select the variable as a split candidate in the random forest. However, as previoiusly mentioned, manual calculations will be required for aggregating the gini impurity of each variable in the NRF2 model since the netRandomForest::nrf2_training function only returns the variable importances for each tree separately. This process will be repeated for various q values at K=5 clusters. 
+Now that we have assessed the predictive performance of four different random forest methods, we will now identify and visualize the important variables (i.e. predictors that have more influence on the response) from the NRF2 and standard RF models. These quantities will be computed using the following variable importance metric: mean decrease in the Gini index of node impurity by splits for each variable. In simpler terms, this is a measure of how well a variable (or node) of a decision tree classifies the data every time a split is introduced to it and is averaged across all trees that select the variable as a split candidate in the random forest. However, as previously mentioned, manual calculations will be required for aggregating the Gini impurity of each variable in the NRF2 model since the `netRandomForest::nrf2_training` function only returns the variable importances for each tree separately. This process will be repeated for various $q$ values at $K=5$ clusters. 
 
-After calculating the variable importances for both models, we also measured their classification performance in terms of the 'degree' of importance for each variable (scaled to be between 0 to 1) relative to those of the 'true' matrix (i.e. how 'well' the variables match up with those of the 'true' matrix in regards to their mean decrease in gini impurity). The latter is defined as a matrix that contains 1's within the (3,1) and (1,3) "block" regions and 0's everywhere else. This performance can be visually detected by an ROC curve, which is computed for each q value. More specifically, we would expect that larger q values would yield ROC curves that are closer to the upper-left corner and are associated with better classifiers. 
+After calculating the variable importances for both models, we also measured their classification performance in terms of the 'degree' of importance for each variable (scaled to be between 0 to 1) relative to those of the 'true' matrix (i.e. how 'well' the variables match up with those of the 'true' matrix in regards to their mean decrease in Gini impurity). The latter is defined as a matrix that contains 1's within the $(3,1)$ and $(1,3)$ 'block' regions and 0's everywhere else. This performance can be visually detected by an ROC curve, which is computed for each $q$ value. More specifically, we would expect that larger $q$ values would yield ROC curves that are closer to the upper-left corner and are associated with better classifiers. 
 
-```{r}
+```{r message=FALSE,warning=FALSE}
 ## Obtain variable importance measures at K=5 clusters and q=0.2...0.5 for NRF2 (B=10) and the standard RF (B=1000) models. Compare their classification performances based on how 'close' the importance variables match up with those of the 'true' matrix
 num_clusters=5
 
@@ -368,13 +369,13 @@ for(q in 1:length(q_vals)){
   title(main = title_name)
 }
 ```
+
 Indeed, the above hypothesis is confirmed by the plotted ROC curves with NRF2 consistently having better performance than the standard RF model. 
 
-```{r}
+```{r message=FALSE,warning=FALSE}
 ## Plot the predicted matrices of NRF2 and standard RF at q=0.4, respectively
 plot_adjmatrix(VI_mat)
 plot_adjmatrix(scaled_rf_importance)
 ```
 
-The predicted matrices of both models also indicate that the (3,1); (1,3) 'blocks' are much more distinguishable from all the other regions for NRF2 compared to those of the standard RF model.
-
+The predicted matrices of both models also indicate that the $(3,1); (1,3)$ 'blocks' are much more distinguishable from all the other regions for NRF2 compared to those of the standard RF model.
